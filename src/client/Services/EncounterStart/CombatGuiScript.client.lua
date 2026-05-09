@@ -1,0 +1,12 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TurnEvent = ReplicatedStorage:WaitForChild("Shared")
+	:WaitForChild("Services")
+	:WaitForChild("TurnSystem")
+	:WaitForChild("TurnEvent")
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local CombatGui = PlayerGui:WaitForChild("CombatGui")
+TurnEvent.OnClientEvent:Connect(function()
+	print("funcionou")
+end)

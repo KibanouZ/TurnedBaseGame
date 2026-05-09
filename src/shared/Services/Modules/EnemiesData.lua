@@ -1,0 +1,3 @@
+local EnimiesData = {}
+
+return EnimiesData
