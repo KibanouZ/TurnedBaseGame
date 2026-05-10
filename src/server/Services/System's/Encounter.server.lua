@@ -1,9 +1,12 @@
 local EffectiveArea = game.Workspace:WaitForChild("EncounterStart"):WaitForChild("EffectiveArea")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local EnemiesData = require(ReplicatedStorage.Shared.Services.Modules.EnemiesData)
+local EnemieSModels = ReplicatedStorage.Shared.Services.Enemies
 local RemoteEvent = ReplicatedStorage:WaitForChild("Shared")
 	:WaitForChild("Services")
 	:WaitForChild("TurnSystem")
 	:WaitForChild("TurnEvent")
+
 local debounce = false
 EffectiveArea.Touched:Connect(function(hit)
 	if debounce then
@@ -24,6 +27,10 @@ EffectiveArea.Touched:Connect(function(hit)
 			local EnemyFolder = game.Workspace:WaitForChild("EnemyFolder")
 			EnemyFolder.Parent = BattleFolder
 			player.Character.Parent = AllyFolder
+			local EnemyModel = EnemieSModels.Enemy1:Clone()
+			EnemyModel.Parent = EnemyFolder
+			local STATS = EnemiesData["Enemy1"]
+			print(STATS.MaxHealth)
 		end
 	end
 end)
