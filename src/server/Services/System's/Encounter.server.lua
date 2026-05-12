@@ -1,4 +1,5 @@
 local EffectiveArea = game.Workspace:WaitForChild("EncounterStart"):WaitForChild("EffectiveArea")
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EnemiesData = require(ReplicatedStorage.Shared.Services.Modules.EnemiesData)
 local EnemieSModels = ReplicatedStorage.Shared.Services.Enemies
@@ -6,7 +7,12 @@ local RemoteEvent = ReplicatedStorage:WaitForChild("Shared")
 	:WaitForChild("Services")
 	:WaitForChild("TurnSystem")
 	:WaitForChild("TurnEvent")
-
+local ServerScriptService = game:GetService("ServerScriptService")
+local BattleStartedEvent = ServerScriptService:WaitForChild("Server")
+	:WaitForChild("Services")
+	:WaitForChild("Events")
+	:WaitForChild("BattleStartedEvent")
+print(BattleStartedEvent)
 local debounce = false
 EffectiveArea.Touched:Connect(function(hit)
 	if debounce then
@@ -27,10 +33,22 @@ EffectiveArea.Touched:Connect(function(hit)
 			local EnemyFolder = game.Workspace:WaitForChild("EnemyFolder")
 			EnemyFolder.Parent = BattleFolder
 			player.Character.Parent = AllyFolder
-			local EnemyModel = EnemieSModels.Enemy1:Clone()
+			local EnemyModel = EnemieSModels.Enemy1:Clone() -- trocar futuramente
 			EnemyModel.Parent = EnemyFolder
-			local STATS = EnemiesData["Enemy1"]
-			print(STATS.MaxHealth)
+			local EnemyStats = EnemiesData["Enemy1"]
+			print(EnemyStats.MaxHealth)
+			--pegar o inimigo agora e botar na frente do player
+			local PlayerPosition = player.Character:WaitForChild("HumanoidRootPart").Position
+			print(PlayerPosition)
+			local EnemyPosition = PlayerPosition + Vector3.new(0, 0, -30)
+			print(EnemyModel)
+			EnemyModel:PivotTo(CFrame.lookAt(EnemyPosition, PlayerPosition))
+
+			local Humanoid = player.Character:WaitForChild("Humanoid")
+			Humanoid.WalkSpeed = 0
+			Humanoid.JumpPower = 0
+			--Encontro Começou
+			BattleStartedEvent:Fire(player)
 		end
 	end
 end)
