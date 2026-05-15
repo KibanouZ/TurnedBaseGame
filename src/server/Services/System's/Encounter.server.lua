@@ -8,12 +8,22 @@ local RemoteEvent = ReplicatedStorage:WaitForChild("Shared")
 	:WaitForChild("TurnSystem")
 	:WaitForChild("TurnEvent")
 local ServerScriptService = game:GetService("ServerScriptService")
+local PassToEncounterEvent = ServerScriptService:WaitForChild("Server")
+	:WaitForChild("Services")
+	:WaitForChild("Events")
+	:WaitForChild("PassToEncounterEvent")
+print(PassToEncounterEvent)
 local BattleStartedEvent = ServerScriptService:WaitForChild("Server")
 	:WaitForChild("Services")
 	:WaitForChild("Events")
 	:WaitForChild("BattleStartedEvent")
-print(BattleStartedEvent)
+
 local debounce = false
+PassToEncounterEvent.Event:Connect(function(partyMembers)
+	-- Aqui você pode usar a lista de membros da party para configurar o encontro
+	-- Por exemplo, você pode criar inimigos com base no número de membros da party
+	print("Party members in encounter:", partyMembers)
+end)
 EffectiveArea.Touched:Connect(function(hit)
 	if debounce then
 		return

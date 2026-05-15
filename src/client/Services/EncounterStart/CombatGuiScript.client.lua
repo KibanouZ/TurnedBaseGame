@@ -6,7 +6,7 @@ local TurnEvent = ReplicatedStorage:WaitForChild("Shared")
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local CombatGui = PlayerGui:WaitForChild("CombatGui")
+local CombatGui = PlayerGui:WaitForChild("CombatGui", 10)
 TurnEvent.OnClientEvent:Connect(function()
 	CombatGui.Enabled = true
 end)
