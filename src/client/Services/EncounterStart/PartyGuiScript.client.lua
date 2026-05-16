@@ -30,7 +30,7 @@ end
 Players.PlayerAdded:Connect(UpdatePlayers)
 Players.PlayerRemoving:Connect(UpdatePlayers)
 UpdatePlayers()
-ShowPartyButton.InputBegan:Connect(function(input) --ok
+ShowPartyButton.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		Party.Visible = true
 		ClosePartyButton.Visible = true

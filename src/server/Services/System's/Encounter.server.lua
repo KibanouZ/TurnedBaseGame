@@ -1,6 +1,6 @@
 local EffectiveArea = game.Workspace:WaitForChild("EncounterStart"):WaitForChild("EffectiveArea")
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PartyManager = require(ReplicatedStorage.Shared.Services.Modules.PartyManager)
 local EnemiesData = require(ReplicatedStorage.Shared.Services.Modules.EnemiesData)
 local EnemieSModels = ReplicatedStorage.Shared.Services.Enemies
 local RemoteEvent = ReplicatedStorage:WaitForChild("Shared")
@@ -8,22 +8,13 @@ local RemoteEvent = ReplicatedStorage:WaitForChild("Shared")
 	:WaitForChild("TurnSystem")
 	:WaitForChild("TurnEvent")
 local ServerScriptService = game:GetService("ServerScriptService")
-local PassToEncounterEvent = ServerScriptService:WaitForChild("Server")
-	:WaitForChild("Services")
-	:WaitForChild("Events")
-	:WaitForChild("PassToEncounterEvent")
-print(PassToEncounterEvent)
 local BattleStartedEvent = ServerScriptService:WaitForChild("Server")
 	:WaitForChild("Services")
 	:WaitForChild("Events")
 	:WaitForChild("BattleStartedEvent")
 
 local debounce = false
-PassToEncounterEvent.Event:Connect(function(partyMembers)
-	-- Aqui você pode usar a lista de membros da party para configurar o encontro
-	-- Por exemplo, você pode criar inimigos com base no número de membros da party
-	print("Party members in encounter:", partyMembers)
-end)
+
 EffectiveArea.Touched:Connect(function(hit)
 	if debounce then
 		return
@@ -33,6 +24,12 @@ EffectiveArea.Touched:Connect(function(hit)
 		local player = game.Players:GetPlayerFromCharacter(hit.Parent)
 		if player then
 			debounce = true
+			local memberIds = PartyManager.GetMemberIds(player)
+			for _, id in ipairs(memberIds) do
+				local memberPlayer = game.Players:GetPlayerByUserId(id)
+				print("Starting Encounter with:", memberPlayer.Name)
+			end
+
 			RemoteEvent:FireClient(player)
 			EffectiveArea.CanTouch = false
 			local BattleFolder = Instance.new("Folder")
@@ -43,7 +40,7 @@ EffectiveArea.Touched:Connect(function(hit)
 			local EnemyFolder = game.Workspace:WaitForChild("EnemyFolder")
 			EnemyFolder.Parent = BattleFolder
 			player.Character.Parent = AllyFolder
-			local EnemyModel = EnemieSModels.Enemy1:Clone() -- trocar futuramente
+			local EnemyModel = EnemieSModels.Enemy1:Clone()
 			EnemyModel.Parent = EnemyFolder
 			local EnemyStats = EnemiesData["Enemy1"]
 			print(EnemyStats.MaxHealth)
