@@ -12,50 +12,104 @@ local BattleStartedEvent = ServerScriptService:WaitForChild("Server")
 	:WaitForChild("Services")
 	:WaitForChild("Events")
 	:WaitForChild("BattleStartedEvent")
-
 local debounce = false
+local SpacingBetweenPlayers = 10
+local EnemyDistance = 30
+
+local function GetAllPartyMembers(leaderPlayer, memberIds)
+	local members = { leaderPlayer }
+	for _, id in ipairs(memberIds) do
+		local member = game.Players:GetPlayerByUserId(id)
+		if member and member ~= leaderPlayer and member.Character then
+			table.insert(members, member)
+		end
+	end
+	return members
+end
+
+local function PositionPartyFormation(members, leaderPosition, enemyPosition)
+	local ForwardDir = (enemyPosition - leaderPosition).Unit
+
+	local RightDir = ForwardDir:Cross(Vector3.new(0, 1, 0)).Unit
+
+	local total = #members
+
+	local startOffset = -((total - 1) / 2) * SpacingBetweenPlayers
+
+	for i, member in ipairs(members) do
+		local sideOffset = startOffset + (i - 1) * SpacingBetweenPlayers
+		local targetPos = leaderPosition + RightDir * sideOffset
+
+		if member.Character and member.Character:FindFirstChild("HumanoidRootPart") then
+			targetPos = Vector3.new(targetPos.X, member.Character.HumanoidRootPart.Position.Y, targetPos.Z)
+
+			local targetCFrame = CFrame.lookAt(targetPos, targetPos + ForwardDir)
+			member.Character:PivotTo(targetCFrame)
+		end
+	end
+end
+
+local function SetPlayerFrozen(member, frozen)
+	if member.Character then
+		local humanoid = member.Character:FindFirstChild("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = frozen and 0 or 16
+			humanoid.JumpPower = frozen and 0 or 50
+		end
+	end
+end
 
 EffectiveArea.Touched:Connect(function(hit)
 	if debounce then
 		return
 	end
-	EffectiveArea.CanTouch = false
+
 	if hit.Parent:FindFirstChild("Humanoid") then
 		local player = game.Players:GetPlayerFromCharacter(hit.Parent)
-		if player then
-			debounce = true
-			local memberIds = PartyManager.GetMemberIds(player)
-			for _, id in ipairs(memberIds) do
-				local memberPlayer = game.Players:GetPlayerByUserId(id)
-				print("Starting Encounter with:", memberPlayer.Name)
-			end
-
-			RemoteEvent:FireClient(player)
-			EffectiveArea.CanTouch = false
-			local BattleFolder = Instance.new("Folder")
-			BattleFolder.Parent = game.Workspace
-			BattleFolder.Name = "Batalha de " .. player.Name
-			local AllyFolder = game.Workspace:WaitForChild("AllyFolder")
-			AllyFolder.Parent = BattleFolder
-			local EnemyFolder = game.Workspace:WaitForChild("EnemyFolder")
-			EnemyFolder.Parent = BattleFolder
-			player.Character.Parent = AllyFolder
-			local EnemyModel = EnemieSModels.Enemy1:Clone()
-			EnemyModel.Parent = EnemyFolder
-			local EnemyStats = EnemiesData["Enemy1"]
-			print(EnemyStats.MaxHealth)
-			--pegar o inimigo agora e botar na frente do player
-			local PlayerPosition = player.Character:WaitForChild("HumanoidRootPart").Position
-			print(PlayerPosition)
-			local EnemyPosition = PlayerPosition + Vector3.new(0, 0, -30)
-			print(EnemyModel)
-			EnemyModel:PivotTo(CFrame.lookAt(EnemyPosition, PlayerPosition))
-
-			local Humanoid = player.Character:WaitForChild("Humanoid")
-			Humanoid.WalkSpeed = 0
-			Humanoid.JumpPower = 0
-			--Encontro Começou
-			BattleStartedEvent:Fire(player)
+		if not player then
+			return
 		end
+
+		debounce = true
+		print("1- Player encontrado:", player.Name)
+		EffectiveArea.CanTouch = false
+
+		local BattleFolder = Instance.new("Folder")
+		BattleFolder.Name = "Batalha de " .. player.Name
+		BattleFolder.Parent = game.Workspace
+
+		local AllyFolder = game.Workspace:WaitForChild("AllyFolder")
+		AllyFolder.Parent = BattleFolder
+		local EnemyFolder = game.Workspace:WaitForChild("EnemyFolder")
+		EnemyFolder.Parent = BattleFolder
+
+		-- Mudar Futuramente para spawnar inimigos aleatórios
+		local leaderPos = player.Character:WaitForChild("HumanoidRootPart").Position
+		print("4 - Posição do líder:", leaderPos)
+		local EnemyModel = EnemieSModels.Enemy1:Clone()
+		EnemyModel.Parent = EnemyFolder
+		local enemyPos = leaderPos + Vector3.new(0, 0, -EnemyDistance)
+		print("5 - Inimigo posicionado")
+		EnemyModel:PivotTo(CFrame.lookAt(enemyPos, leaderPos))
+
+		local memberIds = PartyManager.GetMemberIds(player)
+		print("2 - memberIds", memberIds)
+		local allMembers = GetAllPartyMembers(player, memberIds)
+		print("3 - allMembers", #allMembers)
+
+		PositionPartyFormation(allMembers, leaderPos, enemyPos)
+		print("6 - Formação posicionada")
+
+		for _, member in ipairs(allMembers) do
+			print("7 - Processando membro:", member.Name)
+			member.Character.Parent = AllyFolder
+			SetPlayerFrozen(member, true)
+			RemoteEvent:FireClient(member, "StartBattle")
+		end
+
+		local EnemyStats = EnemiesData["Enemy1"]
+		print("HP do inimigo:", EnemyStats.MaxHealth)
+		print("8 - Batalha iniciando")
+		BattleStartedEvent:Fire(player)
 	end
 end)

@@ -5,6 +5,7 @@ local EnimiesData = {
 		Health = 20,
 		Damage = 3,
 		Xp = 10,
+		Speed = 4,
 	},
 	Enemy2 = {
 		Name = "Skeleton",
@@ -12,6 +13,7 @@ local EnimiesData = {
 		Health = 15,
 		Damage = 5,
 		Xp = 10,
+		Speed = 5,
 	},
 	Enemy3 = {
 		Name = "Slime",
@@ -19,6 +21,7 @@ local EnimiesData = {
 		Health = 20,
 		Damage = 5,
 		Xp = 15,
+		Speed = 3,
 	},
 }
 return EnimiesData

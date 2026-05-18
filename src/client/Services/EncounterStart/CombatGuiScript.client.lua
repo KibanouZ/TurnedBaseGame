@@ -7,8 +7,10 @@ local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local CombatGui = PlayerGui:WaitForChild("CombatGui", 10)
-TurnEvent.OnClientEvent:Connect(function()
-	CombatGui.Enabled = true
+TurnEvent.OnClientEvent:Connect(function(action)
+	if action == "StartBattle" then
+		CombatGui.Enabled = true
+	end
 end)
 local FrameButtons = CombatGui:WaitForChild("Buttons")
 local ButtonAttack = FrameButtons:WaitForChild("Attack")
