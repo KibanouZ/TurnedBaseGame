@@ -15,6 +15,7 @@ local BattleStartedEvent = ServerScriptService:WaitForChild("Server")
 local debounce = false
 local SpacingBetweenPlayers = 10
 local EnemyDistance = 30
+local enemyId = "Enemy1"
 
 local function GetAllPartyMembers(leaderPlayer, memberIds)
 	local members = { leaderPlayer }
@@ -86,7 +87,7 @@ EffectiveArea.Touched:Connect(function(hit)
 		-- Mudar Futuramente para spawnar inimigos aleatórios
 		local leaderPos = player.Character:WaitForChild("HumanoidRootPart").Position
 		print("4 - Posição do líder:", leaderPos)
-		local EnemyModel = EnemieSModels.Enemy1:Clone()
+		local EnemyModel = EnemieSModels[enemyId]:Clone()
 		EnemyModel.Parent = EnemyFolder
 		local enemyPos = leaderPos + Vector3.new(0, 0, -EnemyDistance)
 		print("5 - Inimigo posicionado")
@@ -106,10 +107,11 @@ EffectiveArea.Touched:Connect(function(hit)
 			SetPlayerFrozen(member, true)
 			RemoteEvent:FireClient(member, "StartBattle")
 		end
+		local enemyList = {
+			{ id = enemyId },
+		}
 
-		local EnemyStats = EnemiesData["Enemy1"]
-		print("HP do inimigo:", EnemyStats.MaxHealth)
 		print("8 - Batalha iniciando")
-		BattleStartedEvent:Fire(player)
+		BattleStartedEvent:Fire(player, enemyList)
 	end
 end)
