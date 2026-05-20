@@ -14,7 +14,7 @@ local BattleStartedEvent = ServerScriptService:WaitForChild("Server")
 	:WaitForChild("Services")
 	:WaitForChild("Events")
 	:WaitForChild("BattleStartedEvent")
-
+local AttacksData = require(ReplicatedStorage.Shared.Services.Modules.AttacksData)
 local EnemiesData = require(ReplicatedStorage.Shared.Services.Modules.EnemiesData)
 local PartyManager = require(ReplicatedStorage.Shared.Services.Modules.PartyManager)
 local DataManager = require(ServerScriptService.Server.Data.DataManager)
@@ -157,7 +157,7 @@ local function NextTurn(battleId)
 
 	StartTurn(battleId)
 end
-
+-- Turno da IA (MUDAR)
 local function ExecuteEnemyTurn(battleId)
 	local battle = ActiveBattles[battleId]
 	if not battle then
@@ -214,10 +214,15 @@ StartTurn = function(battleId)
 	end
 
 	local entity = battle.turnOrder[battle.currentIndex]
-
+	local profile = DataManager.Profiles[entity.player.UserId]
 	if entity.type == "ally" then
 		-- Avisa o player que é sua vez
-		TurnEvent:FireClient(entity.player, "YourTurn")
+		TurnEvent:FireClient(entity.player, "YourTurn", {
+			attacks = profile.Data.Attacks,
+			energy = profile.Data.Stats.Energy,
+			maxEnergy = profile.Data.Stats.MaxEnergy,
+		})
+
 		print("Turno de:", entity.player.Name)
 	elseif entity.type == "enemy" then
 		print("Turno do inimigo:", entity.id)
@@ -225,7 +230,7 @@ StartTurn = function(battleId)
 		ExecuteEnemyTurn(battleId)
 	end
 end
-TurnActionEvent.OnServerEvent:Connect(function(player, action)
+TurnActionEvent.OnServerEvent:Connect(function(player, action, data)
 	-- Acha a batalha do player
 	local battleId = player.UserId
 	local battle = ActiveBattles[battleId]
@@ -240,12 +245,23 @@ TurnActionEvent.OnServerEvent:Connect(function(player, action)
 	end
 
 	if action == "Attack" then
-		-- Ataca o primeiro inimigo vivo
+		-- Escolhe alvo: usa targetName enviado pelo cliente se houver, senão primeiro inimigo vivo
 		local target = nil
-		for _, enemy in ipairs(battle.enemies) do
-			if enemy.currentHealth > 0 then
-				target = enemy
-				break
+		if data and data.targetName then
+			for _, enemy in ipairs(battle.enemies) do
+				if enemy.id == data.targetName and enemy.currentHealth > 0 then
+					target = enemy
+					break
+				end
+			end
+		end
+
+		if not target then
+			for _, enemy in ipairs(battle.enemies) do
+				if enemy.currentHealth > 0 then
+					target = enemy
+					break
+				end
 			end
 		end
 
@@ -254,10 +270,14 @@ TurnActionEvent.OnServerEvent:Connect(function(player, action)
 			local damage = profile.Data.Stats.Stregth -- mesmo nome do template
 			target.currentHealth = math.max(0, target.currentHealth - damage)
 
-			TurnEvent:FireClient(player, "AttackResult", {
-				damage = damage,
-				targetHealth = target.currentHealth,
-			})
+			-- Notifica todos os aliados para atualizarem a UI do inimigo
+			for _, ally in ipairs(battle.allies) do
+				TurnEvent:FireClient(ally, "AttackResult", {
+					targetId = target.id,
+					damage = damage,
+					targetHealth = target.currentHealth,
+				})
+			end
 
 			print(player.Name, "atacou", target.id, "por", damage, "de dano")
 		end
