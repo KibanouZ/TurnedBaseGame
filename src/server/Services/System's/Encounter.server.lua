@@ -8,6 +8,7 @@ local RemoteEvent = ReplicatedStorage:WaitForChild("Shared")
 	:WaitForChild("TurnSystem")
 	:WaitForChild("TurnEvent")
 local ServerScriptService = game:GetService("ServerScriptService")
+local DataManager = require(ServerScriptService.Server.Data.DataManager)
 local BattleStartedEvent = ServerScriptService:WaitForChild("Server")
 	:WaitForChild("Services")
 	:WaitForChild("Events")
@@ -59,7 +60,7 @@ local function SetPlayerFrozen(member, frozen)
 		end
 	end
 end
-
+--mudar algum dia para spawnar inimigos aleatórios, talvez usando um sistema de níveis ou algo do tipo
 EffectiveArea.Touched:Connect(function(hit)
 	if debounce then
 		return
@@ -105,7 +106,12 @@ EffectiveArea.Touched:Connect(function(hit)
 			print("7 - Processando membro:", member.Name)
 			member.Character.Parent = AllyFolder
 			SetPlayerFrozen(member, true)
-			RemoteEvent:FireClient(member, "StartBattle")
+			local profile = DataManager.Profiles[member.UserId]
+			local maxHealth = profile and profile.Data.Stats.MaxHealth or 25
+
+			RemoteEvent:FireClient(member, "StartBattle", {
+				maxHealth = maxHealth,
+			})
 		end
 		local enemyList = {
 			{ id = enemyId },

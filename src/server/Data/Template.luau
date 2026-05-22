@@ -1,5 +1,6 @@
 return {
 	Stats = {
+		MaxHealth = 25,
 		Health = 25,
 		Speed = 5,
 		Stregth = 5,

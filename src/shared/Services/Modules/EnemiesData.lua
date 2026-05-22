@@ -6,6 +6,7 @@ local EnimiesData = {
 		Damage = 3,
 		Xp = 10,
 		Speed = 4,
+		Attacks = { "Slash", "Fireball" },
 	},
 	Enemy2 = {
 		Name = "Skeleton",
