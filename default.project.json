@@ -5,7 +5,9 @@
 
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
-      "$ignoreUnknownInstances": true,
+       "Packages": {
+        "$path": "Packages"
+      },
       "Shared": {
         "$path": "src/shared",
         "$ignoreUnknownInstances": true
@@ -13,53 +15,31 @@
     },
 
     "ServerScriptService": {
-      "$ignoreUnknownInstances": true,
       "Server": {
         "$path": "src/server"
+        
       }
     },
 
     "StarterPlayer": {
-      "$ignoreUnknownInstances": true,
+  
       "StarterPlayerScripts": {
+      
         "Client": {
+        
           "$path": "src/client"
+          
         }
       }
     },
 
-    "Workspace": {
-      "$className": "Workspace",
-      "$ignoreUnknownInstances": true,
-      "$properties": {
-        "FilteringEnabled": true
-      },
-      "Baseplate": {
-        "$className": "Part",
-        "$properties": {
-          "Anchored": true,
-          "Color": [0.38823, 0.37254, 0.38823],
-          "Locked": true,
-          "Position": [0, -10, 0],
-          "Size": [512, 20, 512]
-        }
-      }
-    },
+ 
 
     "StarterGui": {
-      "$className": "StarterGui",
-      "$ignoreUnknownInstances": true
+      "$className": "StarterGui"
+     
     },
 
-    "Lighting": {
-      "$properties": {
-        "Ambient": [0, 0, 0],
-        "Brightness": 2,
-        "GlobalShadows": true,
-        "Outlines": false,
-        "Technology": "Voxel"
-      }
-    },
 
     "SoundService": {
       "$properties": {
