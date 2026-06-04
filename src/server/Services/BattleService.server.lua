@@ -6,13 +6,13 @@ local TurnEvent = Remotes.TurnEvent
 local TurnActionEvent = Remotes.TurnActionEvent
 local BattleEvents = require(ServerScriptService.Server.Net.BattleEvents)
 local BattleStartedEvent = BattleEvents.BattleStartedEvent
-local PassToEncounterEvent = BattleEvents.PassToEncounterEvent
 local Requires = require(Shared.Util.Requires)
 local AttacksData = Requires.playerSkills()
 local EnemiesData = Requires.enemyRegistry()
 local EnemiesAttacksData = Requires.enemySkills()
 local DataManager = Requires.dataManager()
 local ActiveBattles = {}
+local PassToEncounterEvent = BattleEvents.PassToEncounterEvent
 local BattleSetup = require(ServerScriptService.Server.Domain.Encounter.BattleSetup)
 local TurnManagement = require(ServerScriptService.Server.Domain.Turn.TurnManagement)
 local activeStates: { [string]: BattleSetup.BattleState } = {}
@@ -64,7 +64,9 @@ function Battle:FireAllAllies(event, data)
 		TurnEvent:FireClient(ally, event, data)
 	end
 end
+
 function Battle:End(result)
+	PassToEncounterEvent:Fire(self.battleId)
 	self.state = "ended"
 	for _, ally in ipairs(self.allies) do
 		ActiveBattles[ally.UserId] = nil

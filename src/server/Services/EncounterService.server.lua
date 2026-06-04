@@ -227,6 +227,7 @@ EffectiveArea.Touched:Connect(function(hit: BasePart)
 		if returnedBattleId ~= battleId then
 			return
 		end
+		print("[EncounterService] PassToEncounter processando batalha:", battleId)
 		cleanupBattle(battleId, members, battleFolder)
 		connection:Disconnect()
 	end)
