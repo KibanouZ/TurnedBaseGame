@@ -1,168 +1,233 @@
-local EffectiveArea = game.Workspace:WaitForChild("EncounterStart"):WaitForChild("EffectiveArea")
+-- ── Dependências ─────────────────────────────────────────────────────────────
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Requires = require(Shared.Util.Requires)
 local PartyManager = Requires.partyManager()
-local EnemiesData = Requires.enemyRegistry()
-local ServicesFolder = Shared:WaitForChild("Services")
-local Battles = game.Workspace:WaitForChild("Battles")
-local HttpService = game:GetService("HttpService")
-local EnemieSModels = Shared:WaitForChild("Assets"):WaitForChild("Enemies")
-if not EnemieSModels then
-	warn("[EncounterService] Pasta ReplicatedStorage.Shared.Services.Enemies não encontrada. ")
-end
-local Remotes = require(Shared.Net.BattleRemotes)
-local RemoteEvent = Remotes.TurnEvent
 local DataManager = Requires.dataManager()
+
+local Remotes = require(Shared.Net.BattleRemotes)
+local TurnEvent = Remotes.TurnEvent
 local BattleEvents = require(ServerScriptService.Server.Net.BattleEvents)
 local BattleStartedEvent = BattleEvents.BattleStartedEvent
 local PassToEncounterEvent = BattleEvents.PassToEncounterEvent
-local ActiveBattles = {}
-local debounce = {}
-local SpacingBetweenPlayers = 10
-local EnemyDistance = 30
-local enemyId = "Enemy1"
-local connection
---Helpers
 
-local function GetAllPartyMembers(leaderPlayer, memberIds)
-	local members = { leaderPlayer }
+-- Domínio (sem Roblox direto)
+local PartyPositioner = require(ServerScriptService.Server.Domain.Encounter.PartyPositioner)
+local BattleSetup = require(ServerScriptService.Server.Domain.Encounter.BattleSetup)
+
+-- Infraestrutura (toca Roblox)
+local EnemySpawner = require(ServerScriptService.Server.Infraestructure.EnemySpawner)
+
+-- ── Referências de workspace / assets ────────────────────────────────────────
+
+local EffectiveArea = workspace:WaitForChild("EncounterStart"):WaitForChild("EffectiveArea")
+local BattlesFolder = workspace:WaitForChild("Battles")
+local EnemyModels = Shared:WaitForChild("Assets"):WaitForChild("Enemies")
+
+if not EnemyModels then
+	warn("[EncounterService] ReplicatedStorage.Shared.Assets.Enemies não encontrada.")
+end
+
+-- ── Estado interno ───────────────────────────────────────────────────────────
+
+-- activeStates[battleId] = BattleSetup.BattleState
+local activeStates: { [string]: BattleSetup.BattleState } = {}
+
+-- debounce por UserId para evitar duplo-trigger
+local debounce: { [number]: boolean } = {}
+
+-- ── Helpers locais ────────────────────────────────────────────────────────────
+
+-- Coleta todos os membros da party com personagem válido.
+local function collectMembers(leader: Player, memberIds: { number }): { Player }
+	local members: { Player } = { leader }
 	for _, id in ipairs(memberIds) do
 		local member = game.Players:GetPlayerByUserId(id)
-		if member and member ~= leaderPlayer and member.Character then
+		if member and member ~= leader and member.Character then
 			table.insert(members, member)
 		end
 	end
 	return members
 end
 
-local function PositionPartyFormation(members, leaderPosition, enemyPosition)
-	local ForwardDir = (enemyPosition - leaderPosition).Unit
-
-	local RightDir = ForwardDir:Cross(Vector3.new(0, 1, 0)).Unit
-
-	local total = #members
-
-	local startOffset = -((total - 1) / 2) * SpacingBetweenPlayers
-
-	for i, member in ipairs(members) do
-		local sideOffset = startOffset + (i - 1) * SpacingBetweenPlayers
-		local targetPos = leaderPosition + RightDir * sideOffset
-
-		if member.Character and member.Character:FindFirstChild("HumanoidRootPart") then
-			targetPos = Vector3.new(targetPos.X, member.Character.HumanoidRootPart.Position.Y, targetPos.Z)
-
-			local targetCFrame = CFrame.lookAt(targetPos, targetPos + ForwardDir)
-			member.Character:PivotTo(targetCFrame)
+-- Extrai posições atuais dos membros como { [userId] = Vector3 }.
+local function extractPositions(members: { Player }): { [number]: Vector3 }
+	local positions: { [number]: Vector3 } = {}
+	for _, member in ipairs(members) do
+		local root = member.Character and member.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			positions[member.UserId] = (root :: BasePart).Position
 		end
+	end
+	return positions
+end
+
+-- Aplica freeze/unfreeze no Humanoid de um personagem.
+local function setFrozen(member: Player, frozen: boolean)
+	local char = member.Character
+	if not char then
+		return
+	end
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = frozen and 0 or 16
+		humanoid.JumpPower = frozen and 0 or 50
 	end
 end
 
-local function SetPlayerFrozen(member, frozen)
-	if member.Character then
-		local humanoid = member.Character:FindFirstChild("Humanoid")
-		if humanoid then
-			humanoid.WalkSpeed = frozen and 0 or 16
-			humanoid.JumpPower = frozen and 0 or 50
-		end
+-- Desfaz tudo de uma batalha: descongela, devolve chars ao workspace, limpa tabelas.
+local function cleanupBattle(battleId: string, members: { Player }, battleFolder: Folder)
+	for _, member in ipairs(members) do
+		setFrozen(member, false)
+		debounce[member.UserId] = nil
 	end
+
+	if battleFolder and battleFolder.Parent then
+		battleFolder:Destroy()
+	end
+
+	activeStates[battleId] = nil
 end
 
---mudar algum dia para spawnar inimigos aleatórios, talvez usando um sistema de níveis ou algo do tipo
-EffectiveArea.Touched:Connect(function(hit)
+-- ── Fluxo principal ───────────────────────────────────────────────────────────
+
+EffectiveArea.Touched:Connect(function(hit: BasePart)
+	-- só HumanoidRootPart com Humanoid no pai
 	if hit.Name ~= "HumanoidRootPart" then
 		return
 	end
-	local player = game.Players:GetPlayerFromCharacter(hit.Parent)
+	if not (hit.Parent :: Instance):FindFirstChild("Humanoid") then
+		return
+	end
 
+	local player = game.Players:GetPlayerFromCharacter(hit.Parent)
 	if not player then
 		return
 	end
+	if debounce[player.UserId] then
+		return
+	end
+	debounce[player.UserId] = true
 
-	if debounce[player] then
+	-- ── 1. Coletar membros e posições ─────────────────────────────────────────
+	local memberIds = PartyManager.GetMemberIds(player)
+	local members = collectMembers(player, memberIds)
+	local positions = extractPositions(members)
+
+	local leaderPos = positions[player.UserId]
+	if not leaderPos then
+		warn("[EncounterService] líder sem HumanoidRootPart:", player.Name)
+		debounce[player.UserId] = nil
 		return
 	end
 
-	if hit.Parent:FindFirstChild("Humanoid") then
-		local player = game.Players:GetPlayerFromCharacter(hit.Parent)
-		if not player then
-			return
-		end
+	-- ── 2. Tentar spawnar inimigo (infraestrutura) ────────────────────────────
+	local battleId = BattleSetup.GenerateId()
+	local battleFolder = Instance.new("Folder")
+	battleFolder.Name = battleId
+	battleFolder:SetAttribute("BattleId", battleId)
+	battleFolder.Parent = BattlesFolder
 
-		debounce[player] = true
-		print("1- Player encontrado:", player.Name)
-		EffectiveArea.CanTouch = false
+	local allyFolder = Instance.new("Folder")
+	allyFolder.Name = "AllyFolder"
+	allyFolder.Parent = battleFolder
 
-		local BattleFolder = Instance.new("Folder")
-		local battleId = "battle_" .. HttpService:GenerateGUID(false)
-		BattleFolder.Name = battleId
-		BattleFolder:SetAttribute("BattleId", battleId)
-		BattleFolder.Parent = Battles
-		ActiveBattles[battleId] = {
-			Id = battleId,
-			Folder = BattleFolder,
-			Players = {},
-			Enemies = {},
-			State = "starting",
-		}
+	local enemyFolder = Instance.new("Folder")
+	enemyFolder.Name = "EnemyFolder"
+	enemyFolder.Parent = battleFolder
 
-		local AllyFolder = Instance.new("Folder")
-		AllyFolder.Name = "AllyFolder"
-		AllyFolder.Parent = BattleFolder
-		local EnemyFolder = Instance.new("Folder")
-		EnemyFolder.Name = "EnemyFolder"
-		EnemyFolder.Parent = BattleFolder
-
-		-- Mudar Futuramente para spawnar inimigos aleatórios
-		local leaderPos = player.Character:WaitForChild("HumanoidRootPart").Position
-
-		if not EnemieSModels or not EnemieSModels:FindFirstChild(enemyId) then
-			warn("[EncounterService] Modelo de inimigo não encontrado:", enemyId)
-			EffectiveArea.CanTouch = true
-			debounce[player] = nil
-			return
-		end
-		local EnemyModel = EnemieSModels[enemyId]:Clone()
-		EnemyModel.Parent = EnemyFolder
-		local enemyPos = leaderPos + Vector3.new(0, 0, -EnemyDistance)
-
-		EnemyModel:PivotTo(CFrame.lookAt(enemyPos, leaderPos))
-
-		local memberIds = PartyManager.GetMemberIds(player)
-
-		local allMembers = GetAllPartyMembers(player, memberIds)
-
-		PositionPartyFormation(allMembers, leaderPos, enemyPos)
-
-		for _, member in ipairs(allMembers) do
-			member.Character.Parent = AllyFolder
-			SetPlayerFrozen(member, true)
-			local profile = DataManager.Profiles[member.UserId]
-			local maxHealth = profile and profile.Data.Stats.MaxHealth or 25
-
-			RemoteEvent:FireClient(member, "StartBattle", {
-				maxHealth = maxHealth,
-			})
-		end
-		local enemyList = {
-			{ id = enemyId },
-		}
-
-		BattleStartedEvent:Fire(player, enemyList)
-
-		connection = PassToEncounterEvent.Event:Connect(function(allies)
-			for _, member in ipairs(allies) do
-				SetPlayerFrozen(member, false)
-
-				if member.Character then
-					member.Character.Parent = workspace
-				end
-			end
-			debounce[player] = nil
-			EffectiveArea.CanTouch = true
-			BattleFolder:Destroy()
-			connection:Disconnect()
-		end)
+	-- TODO: trocar "Enemy1" por tabela de spawn data-driven (Fase 4 do plano)
+	local spawnResult = EnemySpawner.Spawn("Enemy1", EnemyModels, enemyFolder, leaderPos)
+	if not spawnResult.ok then
+		warn("[EncounterService]", spawnResult.errorMsg)
+		battleFolder:Destroy()
+		debounce[player.UserId] = nil
+		return
 	end
+
+	local enemyPos = spawnResult.position :: Vector3
+
+	-- ── 3. Posicionar party (domínio puro) ────────────────────────────────────
+	local userIds: { number } = {}
+	for _, m in ipairs(members) do
+		table.insert(userIds, m.UserId)
+	end
+
+	local formation = PartyPositioner.Calculate(userIds, positions, enemyPos)
+
+	-- aplica CFrames calculados (chamada Roblox fica aqui no Service, não no módulo)
+	for _, entry in ipairs(formation) do
+		local member = game.Players:GetPlayerByUserId(entry.memberId)
+		if member and member.Character then
+			member.Character:PivotTo(entry.targetCFrame)
+		end
+	end
+
+	-- ── 4. Montar estado da batalha (domínio puro) ────────────────────────────
+	local snapshots: { BattleSetup.AllySnapshot } = {}
+	for _, member in ipairs(members) do
+		local profile = DataManager.Profiles[member.UserId]
+		table.insert(
+			snapshots,
+			BattleSetup.SnapshotFromProfile(member.UserId, member.DisplayName, profile and profile.Data or nil)
+		)
+	end
+
+	local enemyList: { BattleSetup.EnemyEntry } = {
+		{ id = "Enemy1", displayName = "Enemy1" },
+	}
+
+	local battleState = BattleSetup.Build(battleId, snapshots, enemyList)
+	activeStates[battleId] = battleState
+
+	-- ── 5. Preparar jogadores (Roblox) ────────────────────────────────────────
+	for _, member in ipairs(members) do
+		setFrozen(member, true)
+
+		-- envia battleId + snapshot do aliado correspondente ao cliente
+		local snap = snapshots[1] -- fallback
+		for _, s in ipairs(snapshots) do
+			if s.userId == member.UserId then
+				snap = s
+				break
+			end
+		end
+		print("enviando")
+		TurnEvent:FireClient(member, "StartBattle", {
+			battleId = battleId,
+			maxHealth = snap.maxHealth,
+			energy = snap.energy,
+		})
+	end
+
+	-- ── 6. Notificar TurnSystem ───────────────────────────────────────────────
+	-- passa allMembers (não só o líder) para que o TurnSystem registre todos
+	local snapshots = {}
+	for _, member in ipairs(members) do
+		local profile = DataManager.Profiles[member.UserId]
+		table.insert(
+			snapshots,
+			BattleSetup.SnapshotFromProfile(member.UserId, member.DisplayName, profile and profile.Data or nil)
+		)
+	end
+
+	local enemyEntries = { { id = "Enemy1", displayName = "Enemy1" } }
+	local battleState = BattleSetup.Build(battleId, snapshots, enemyEntries)
+
+	BattleStartedEvent:Fire(player, members, enemyList, battleId, battleState)
+
+	-- ── 7. Ouvir fim da batalha ───────────────────────────────────────────────
+	-- connection LOCAL por batalha — evita sobrescrever conexão de outra batalha simultânea
+	local connection: RBXScriptConnection
+	connection = PassToEncounterEvent.Event:Connect(function(returnedBattleId: string)
+		print("[EncounterService] PassToEncounter recebido:", returnedBattleId, "esperado:", battleId)
+		if returnedBattleId ~= battleId then
+			return
+		end
+		cleanupBattle(battleId, members, battleFolder)
+		connection:Disconnect()
+	end)
 end)

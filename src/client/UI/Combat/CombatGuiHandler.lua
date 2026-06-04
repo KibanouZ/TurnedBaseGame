@@ -8,7 +8,8 @@ local CombatGui = PlayerGui:WaitForChild("CombatGui", 10)
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local TurnActionEvent = require(Shared.Net.BattleRemotes).TurnActionEvent
 local EnemiesData = require(Shared.Definitions.Enemies.EnemyRegistry)
-
+local Remotes = require(Shared.Net.BattleRemotes)
+local TurnEvent = Remotes.TurnEvent
 -- ================================================
 -- UI REFERENCES
 -- ================================================
@@ -51,7 +52,16 @@ end
 -- ================================================
 -- HELPERS
 -- ================================================
-
+function CombatGuiHandler:CleanupEnemyHpDisplays()
+	if self.EnemyFolder then
+		for _, enemy in ipairs(self.EnemyFolder:GetChildren()) do
+			local hpDisplay = enemy:FindFirstChild("HpDisplay")
+			if hpDisplay then
+				hpDisplay:Destroy()
+			end
+		end
+	end
+end
 function CombatGuiHandler:UpdateEnemyHealthBar(enemyId, currentHealth)
 	if not self.EnemyFolder then
 		return
@@ -76,6 +86,7 @@ function CombatGuiHandler:UpdateEnemyHealthBar(enemyId, currentHealth)
 
 	local hpLabel = hpDisplay:FindFirstChild("Hplabel")
 	if hpLabel then
+		print("atualizando")
 		hpLabel.Text = currentHealth .. "/" .. EnemiesData[enemy.Name].MaxHealth
 	end
 end
@@ -177,9 +188,11 @@ function CombatGuiHandler:OnCooldown(data)
 end
 
 function CombatGuiHandler:StartBattle(data)
+	print("StartBattle received for battleId: " .. tostring(data.battleId))
 	CombatGui.Enabled = true
-
-	local BattleFolder = workspace:WaitForChild("Batalha de " .. Player.Name)
+	battleId = data.battleId
+	local Battles = workspace:WaitForChild("Battles")
+	local BattleFolder = Battles:WaitForChild(tostring(battleId))
 	self.EnemyFolder = BattleFolder:WaitForChild("EnemyFolder")
 	local Enemy1 = self.EnemyFolder:WaitForChild("Enemy1")
 
@@ -295,4 +308,7 @@ function CombatGuiHandler:EffectExpired(data)
 	end
 end
 
+function CombatGuiHandler:EnemyHealthUpdate(data)
+	self:UpdateEnemyHealthBar(data.enemyId, data.targetHealth)
+end
 return CombatGuiHandler

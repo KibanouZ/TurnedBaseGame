@@ -1,0 +1,3 @@
+local CombatResolver = {}
+
+return CombatResolver

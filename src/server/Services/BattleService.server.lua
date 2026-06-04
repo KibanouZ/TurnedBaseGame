@@ -1,7 +1,5 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
-
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared.Net.BattleRemotes)
 local TurnEvent = Remotes.TurnEvent
@@ -9,15 +7,15 @@ local TurnActionEvent = Remotes.TurnActionEvent
 local BattleEvents = require(ServerScriptService.Server.Net.BattleEvents)
 local BattleStartedEvent = BattleEvents.BattleStartedEvent
 local PassToEncounterEvent = BattleEvents.PassToEncounterEvent
-
 local Requires = require(Shared.Util.Requires)
 local AttacksData = Requires.playerSkills()
 local EnemiesData = Requires.enemyRegistry()
 local EnemiesAttacksData = Requires.enemySkills()
-local PartyManager = Requires.partyManager()
 local DataManager = Requires.dataManager()
 local ActiveBattles = {}
-
+local BattleSetup = require(ServerScriptService.Server.Domain.Encounter.BattleSetup)
+local TurnManagement = require(ServerScriptService.Server.Domain.Turn.TurnManagement)
+local activeStates: { [string]: BattleSetup.BattleState } = {}
 -- ================================================
 -- BATTLE CLASS
 -- ================================================
@@ -34,13 +32,15 @@ local EnemyPool = {
 	{ name = "UseFlee", chance = 0.00 },
 }
 
-function Battle.new(player, allies, enemies, turnOrder)
+function Battle.new(player, allies, enemies, turnQueue, battleId)
 	local self = setmetatable({}, Battle)
 	self.player = player
 	self.allies = allies
 	self.enemies = enemies
-	self.turnOrder = turnOrder
+	self.turnQueue = turnQueue
 	self.currentIndex = 1
+	self.battleId = battleId
+	self.state = "starting"
 	return self
 end
 
@@ -58,11 +58,22 @@ function Battle:GetEnemy(enemyId)
 end
 
 function Battle:FireAllAllies(event, data)
+	print("self.allies no FireAllAllies:", self.allies)
 	for _, ally in ipairs(self.allies) do
+		print(ally.Name)
 		TurnEvent:FireClient(ally, event, data)
 	end
 end
+function Battle:End(result)
+	self.state = "ended"
+	for _, ally in ipairs(self.allies) do
+		ActiveBattles[ally.UserId] = nil
+	end
 
+	activeStates[self.battleId] = nil
+
+	TurnEvent:FireClient(self.player, result, self.battleId)
+end
 function Battle:ApplyCooldown(enemyState, attackName, attackData)
 	if attackData.Cooldown and attackData.Cooldown > 0 then
 		if not enemyState.AttackCooldowns then
@@ -83,7 +94,7 @@ function Battle:ProcessEffects(profile, player)
 
 		if effect.type == "Dot" then
 			profile.Data.Stats.Health = math.max(0, profile.Data.Stats.Health - effect.DamagePerTurn)
-			TurnEvent:FireClient(player, "DotDamage", {
+			self:FireAllAllies("DotDamage", {
 				effectName = effect.name,
 				damage = effect.DamagePerTurn,
 				remainingHealth = profile.Data.Stats.Health,
@@ -93,7 +104,7 @@ function Battle:ProcessEffects(profile, player)
 			effect.duration -= 1
 			if effect.duration <= 0 then
 				table.remove(profile.Data.Effects, i)
-				TurnEvent:FireClient(player, "EffectExpired", { effectName = effect.name })
+				self:FireAllAllies("EffectExpired", { effectName = effect.name })
 			else
 				i += 1
 			end
@@ -106,47 +117,23 @@ end
 -- ================================================
 -- CHECK BATTLE END
 -- ================================================
-
-function Battle:CheckBattleEnd(battleId)
-	local allEnemiesDead = true
-	for _, enemy in ipairs(self.enemies) do
-		if enemy.currentHealth > 0 then
-			allEnemiesDead = false
-			break
-		end
+function Battle:CheckBattleEnd()
+	local result = nil
+	if not self.turnQueue:HasLivingAllies() then
+		result = "Defeat"
+	elseif not self.turnQueue:HasLivingEnemies() then
+		result = "Victory"
 	end
 
-	local allAlliesDead = true
-	for _, ally in ipairs(self.allies) do
-		local profile = DataManager.Profiles[ally.UserId]
-		if profile then
-			if profile.Data.Stats.Health > 0 then
-				allAlliesDead = false
-			else
-				profile.Data.Stats.Health = 0
-			end
-		end
+	if result then
+		self:End(result)
 	end
 
-	if allEnemiesDead then
-		self:FireAllAllies("Victory", {})
-		PassToEncounterEvent:Fire(self.allies)
-		ActiveBattles[battleId] = nil
-		return true
-	elseif allAlliesDead then
-		self:FireAllAllies("Defeat", {})
-		PassToEncounterEvent:Fire(self.allies)
-		ActiveBattles[battleId] = nil
-		return true
-	end
-
-	return false
+	return result
 end
-
 -- ================================================
 -- ENEMY ACTION HANDLERS
 -- ================================================
-
 function Battle:UseAttack(entity, enemyState)
 	local enemyData = EnemiesData[entity.id]
 	local validAttacks = {}
@@ -183,7 +170,7 @@ function Battle:UseAttack(entity, enemyState)
 	end
 
 	profile.Data.Stats.Health = math.max(0, profile.Data.Stats.Health - attackData.Damage)
-	TurnEvent:FireClient(target, "Attacked", {
+	self:FireAllAllies("Attacked", {
 		damage = attackData.Damage,
 		attackName = attackName,
 		attackType = attackData.Type,
@@ -232,7 +219,7 @@ function Battle:UseSpecial(entity, enemyState)
 	end
 
 	profile.Data.Stats.Health = math.max(0, profile.Data.Stats.Health - attackData.Damage)
-	TurnEvent:FireClient(target, "Attacked", {
+	self:FireAllAllies("Attacked", {
 		damage = attackData.Damage,
 		attackName = attackName,
 		remainingHealth = profile.Data.Stats.Health,
@@ -332,7 +319,7 @@ function Battle:UseDebuff(entity, enemyState)
 	end
 
 	profile.Data.Stats.Health = math.max(0, profile.Data.Stats.Health - attackData.Damage)
-	TurnEvent:FireClient(target, "Debuff", {
+	self:FireAllAllies("Debuff", {
 		damage = attackData.Damage,
 		attackName = attackName,
 		DotType = attackData.Dot,
@@ -406,13 +393,17 @@ function Battle:UseFlee(entity, enemyState)
 	print("Inimigo tentou fugir")
 	return true
 end
-
 -- ================================================
 -- EXECUTE ENEMY TURN
 -- ================================================
-
 function Battle:ExecuteEnemyTurn(battleId)
-	local entity = self.turnOrder[self.currentIndex]
+	local entry = self.turnQueue:GetCurrent()
+
+	if not entry then
+		return
+	end
+
+	local entity = entry.entity
 	local enemy = self:GetEnemy(entity.id)
 	if not enemy then
 		return
@@ -421,7 +412,7 @@ function Battle:ExecuteEnemyTurn(battleId)
 	if not enemy.Energy then
 		enemy.Energy = 0
 	end
-	enemy.Energy += 3
+	enemy.Energy += 1
 
 	-- decrementa cooldowns
 	if enemy.AttackCooldowns then
@@ -489,104 +480,64 @@ function Battle:ExecuteEnemyTurn(battleId)
 	end
 	self:NextTurn(battleId)
 end
-
 -- ================================================
 -- START TURN / NEXT TURN
 -- ================================================
-
 function Battle:NextTurn(battleId)
-	self.currentIndex += 1
-	if self.currentIndex > #self.turnOrder then
-		self.currentIndex = 1
-	end
+	self.turnQueue:Next()
 	self:StartTurn(battleId)
 end
 
 function Battle:StartTurn(battleId)
-	local entity = self.turnOrder[self.currentIndex]
+	local entry = self.turnQueue:GetCurrent()
 
-	if entity.type == "ally" then
-		local profile = DataManager.Profiles[entity.player.UserId]
-		if not profile then
-			return
-		end
+	if not entry then
+		return
+	end
 
-		self:ProcessEffects(profile, entity.player)
+	print("Turno atual:", entry.kind)
 
-		if self:CheckBattleEnd(battleId) then
-			return
-		end
+	if entry.kind == "player" then
+		local player = entry.entity
+		local profile = DataManager.Profiles[player.UserId]
+		profile.Data.Stats.Energy = math.min(profile.Data.Stats.Energy + 1, profile.Data.Stats.MaxEnergy)
 
-		-- decrementa cooldowns do player
-		for attackName, turns in pairs(profile.Data.AttackCooldowns) do
-			if turns > 0 then
-				profile.Data.AttackCooldowns[attackName] = turns - 1
-			end
-		end
-
-		profile.Data.Stats.Energy += 1
-
-		TurnEvent:FireClient(entity.player, "YourTurn", {
-			attacks = profile.Data.Attacks,
+		TurnEvent:FireClient(player, "YourTurn", {
+			battleId = battleId,
 			energy = profile.Data.Stats.Energy,
 			maxEnergy = profile.Data.Stats.MaxEnergy,
+			attacks = profile.Data.Attacks or {},
 		})
-	elseif entity.type == "enemy" then
-		task.wait(1)
+	elseif entry.kind == "enemy" then
 		self:ExecuteEnemyTurn(battleId)
 	end
 end
-
 -- ================================================
--- ACTIVE BATTLES
+-- EXIT CHECK
 -- ================================================
-
-local function GetPlayerSpeed(player)
-	local profile = DataManager.Profiles[player.UserId]
-	return profile and profile.Data.Stats.Speed or 5
-end
-
-local function BuildTurnOrder(allies, enemies)
-	local allEntities = {}
-
-	for _, player in ipairs(allies) do
-		table.insert(allEntities, {
-			type = "ally",
-			player = player,
-			speed = GetPlayerSpeed(player),
-		})
+game.Players.PlayerRemoving:Connect(function(player)
+	local battle = ActiveBattles[player.UserId]
+	if not battle then
+		return
 	end
 
-	for _, enemy in ipairs(enemies) do
-		table.insert(allEntities, {
-			type = "enemy",
-			id = enemy.id,
-			speed = EnemiesData[enemy.id].Speed,
-		})
-	end
-
-	table.sort(allEntities, function(a, b)
-		return a.speed > b.speed
-	end)
-
-	return allEntities
-end
-
--- ================================================
--- BATTLE STARTED
--- ================================================
-
-BattleStartedEvent.Event:Connect(function(player, enemyList)
-	local memberIds = PartyManager.GetMemberIds(player)
-	local allies = { player }
-
-	for _, id in ipairs(memberIds) do
-		local member = Players:GetPlayerByUserId(id)
-		if member and member ~= player then
-			table.insert(allies, member)
+	-- remove da lista de allies
+	for i, ally in ipairs(battle.allies) do
+		if ally.UserId == player.UserId then
+			table.remove(battle.allies, i)
+			break
 		end
 	end
 
+	ActiveBattles[player.UserId] = nil
+end)
+-- ================================================
+-- BATTLE STARTED
+-- ================================================
+BattleStartedEvent.Event:Connect(function(player, members, enemyList, battleId, battleState)
+	local allies = members
+
+	-- reset de profile
 	for _, ally in ipairs(allies) do
 		local profile = DataManager.Profiles[ally.UserId]
 		if profile then
@@ -597,7 +548,21 @@ BattleStartedEvent.Event:Connect(function(player, enemyList)
 		end
 	end
 
+	-- monta allies com speed pro TurnManagement
+	local alliesWithSpeed = {}
+	for _, member in ipairs(members) do
+		local profile = DataManager.Profiles[member.UserId]
+		table.insert(alliesWithSpeed, {
+			entity = member,
+			speed = profile and profile.Data.Stats.Speed or 5,
+			health = profile and profile.Data.Stats.Health or 25,
+			kind = "player",
+		})
+	end
+
+	-- monta enemies
 	local enemies = {}
+	print("EnemiesData Speed:", EnemiesData["Enemy1"].Speed, EnemiesData["Enemy1"].Speed)
 	for _, enemy in ipairs(enemyList) do
 		table.insert(enemies, {
 			id = enemy.id,
@@ -605,14 +570,28 @@ BattleStartedEvent.Event:Connect(function(player, enemyList)
 			Energy = 0,
 			activeBuffs = {},
 			AttackCooldowns = {},
+			speed = EnemiesData[enemy.id].Speed or 5,
 		})
 	end
 
-	local turnOrder = BuildTurnOrder(allies, enemies)
-	local battle = Battle.new(player, allies, enemies, turnOrder)
-	ActiveBattles[player.UserId] = battle
+	-- usa TurnManagement.Build em vez de BuildTurnOrder
+	for _, ally in ipairs(alliesWithSpeed) do
+		print("ally entry:", ally.entity, ally.speed, ally.kind)
+	end
+	for _, enemy in ipairs(enemies) do
+		print("enemy entry:", enemy.id, enemy.Speed, enemy.speed)
+	end
 
-	battle:StartTurn(player.UserId)
+	local turnQueue = TurnManagement.Build(alliesWithSpeed, enemies)
+	local battle = Battle.new(player, allies, enemies, turnQueue, battleId)
+	battle.state = "inProgress"
+
+	for _, ally in ipairs(allies) do
+		ActiveBattles[ally.UserId] = battle
+	end
+
+	activeStates[battleId] = battleState
+	battle:StartTurn(battleId)
 end)
 
 -- ================================================
@@ -626,8 +605,8 @@ TurnActionEvent.OnServerEvent:Connect(function(player, action, data)
 		return
 	end
 
-	local entity = battle.turnOrder[battle.currentIndex]
-	if entity.type ~= "ally" or entity.player ~= player then
+	local entry = battle.turnQueue:GetCurrent()
+	if not entry or entry.kind ~= "player" or entry.entity ~= player then
 		return
 	end
 
@@ -689,6 +668,14 @@ TurnActionEvent.OnServerEvent:Connect(function(player, action, data)
 				targetHealth = target.currentHealth,
 				remainingEnergy = profile.Data.Stats.Energy,
 			})
+			for _, ally in ipairs(battle.allies) do
+				if ally ~= player then
+					TurnEvent:FireClient(ally, "EnemyHealthUpdate", {
+						enemyId = target.id,
+						targetHealth = target.currentHealth,
+					})
+				end
+			end
 		end
 	elseif action == "Flee" then
 		local roll = math.random(1, 100)
@@ -702,9 +689,9 @@ TurnActionEvent.OnServerEvent:Connect(function(player, action, data)
 				end
 			end
 
-			for i, e in ipairs(battle.turnOrder) do
-				if e.type == "ally" and e.player == player then
-					table.remove(battle.turnOrder, i)
+			for i, e in ipairs(battle.turnQueue.queue) do
+				if e.kind == "player" and e.entity == player then
+					table.remove(battle.turnQueue.queue, i)
 					break
 				end
 			end

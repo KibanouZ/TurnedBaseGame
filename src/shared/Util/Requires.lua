@@ -39,7 +39,7 @@ function Requires.enemyRegistry()
 end
 
 function Requires.partyManager()
-	return require(getServerFolder().Services.PartyManager)
+	return require(getServerFolder().Domain.Party.PartyManager)
 end
 
 function Requires.dataManager()
@@ -49,5 +49,19 @@ end
 function Requires.zoneModule()
 	return require(Shared.World.Zone)
 end
-
+function Requires.battleSetup()
+	return require(getServerFolder().Domain.Encounter.BattleSetup)
+end
+function Requires.combatResolver()
+	return require(getServerFolder().Domain.Turn.CombatResolver)
+end
+function Requires.enemyDecide()
+	return require(getServerFolder().Domain.Turn.EnemyDecide)
+end
+function Requires.processEffects()
+	return require(getServerFolder().Domain.Turn.ProcessEffects)
+end
+function Requires.TurnQueue()
+	return require(getServerFolder().Domain.Turn.TurnQueue)
+end
 return Requires
